@@ -2,6 +2,8 @@
 #include <stdio.h>
 #include <string.h>
 #include <errno.h>
+#include <dirent.h>
+#include <unistd.h>
 #include "bseq.h"
 #include "minimap.h"
 #include "mmpriv.h"
@@ -104,6 +106,106 @@ static inline void yes_or_no(mm_mapopt_t *opt, int flag, int long_idx, const cha
 		else fprintf(stderr, "[WARNING]\033[1;31m option '--%s' only accepts 'yes' or 'no'.\033[0m\n", long_options[long_idx].name);
 	}
 }
+
+
+void get_files_from_directory(char * dir_name){
+
+	DIR *dp;
+	struct dirent *in_file;
+
+	dp = opendir(dir_name);
+
+	if(dp == NULL){
+		fprintf(stderr,"Cannot open directory\n");
+	}
+	else{
+		while((in_file = readdir(dp))){
+			if(strstr(in_file->d_name, ".fastq") != NULL) {
+				fprintf(stderr,"%s\n",in_file->d_name);
+			}
+		}
+		closedir(dp);
+	}
+
+}
+
+
+int nameSort(const struct dirent **a, const struct dirent **b){
+	
+
+	char * a_name = (*a)->d_name;
+	char * b_name = (*b)->d_name;
+
+	int a_len = strlen(a_name);
+	int b_len = strlen(b_name);
+
+	if(a_len < b_len){
+		return -1;
+	}
+	else if(a_len > b_len){
+		return 1;
+	}
+	else {
+		return strcmp(a_name,b_name);
+	}
+}
+
+int nameCompare(const struct dirent *a){
+	if(strstr(a->d_name,".fastq") != NULL){
+		return 1;
+	}
+	else{
+		return 0;
+	}
+}
+
+
+void get_files_from_directory2(char * dir_name, const mm_idx_t *idx, const mm_mapopt_t *opt, int n_threads){
+
+	struct dirent **in_file;
+	int n;
+	int i;
+
+	int running_count = 0;
+
+	char * filename = (char *)malloc(1024*sizeof(char));
+	int dirlen = strlen(dir_name);
+
+
+	while(1) {
+		n = scandir(dir_name,&in_file,nameCompare,nameSort);
+
+		if(n == -1){
+			fprintf(stderr,"Cannot open directory\n");
+			return;
+		}
+		
+		if(n <= running_count){
+			//fprintf(stderr,"Waiting for a new file\n");
+			sleep(2);
+			continue;
+		}
+
+		memset(filename,0,1024*sizeof(char));
+
+		if(dir_name[dirlen-1] == '/'){
+			sprintf(filename,"%s%s",dir_name,in_file[running_count]->d_name);
+		}
+		else{
+			sprintf(filename,"%s/%s",dir_name,in_file[running_count]->d_name);
+		}
+		fprintf(stderr,"Reading %s\n",filename);
+		mm_map_file(idx,filename,opt,n_threads);
+		fflush(stdout);
+		running_count += 1;
+                sleep(1);
+	}
+
+}
+
+
+
+
 
 int main(int argc, char *argv[])
 {
@@ -388,6 +490,11 @@ int main(int argc, char *argv[])
 		if (junc_bed) mm_idx_bed_read(mi, junc_bed, 1);
 		if (alt_list) mm_idx_alt_read(mi, alt_list);
 		ret = 0;
+
+		fprintf(stderr,"Dir name : %s\n",argv[o.ind + 1]);
+		get_files_from_directory2(argv[o.ind + 1],mi,&opt,n_threads);
+
+                /*
 		if (!(opt.flag & MM_F_FRAG_MODE)) {
 			for (i = o.ind + 1; i < argc; ++i) {
 				ret = mm_map_file(mi, argv[i], &opt, n_threads);
@@ -396,6 +503,8 @@ int main(int argc, char *argv[])
 		} else {
 			ret = mm_map_file_frag(mi, argc - (o.ind + 1), (const char**)&argv[o.ind + 1], &opt, n_threads);
 		}
+                */
+
 		mm_idx_destroy(mi);
 		if (ret < 0) {
 			fprintf(stderr, "ERROR: failed to map the query file\n");
